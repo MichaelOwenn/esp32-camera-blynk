@@ -1,0 +1,124 @@
+// Definisi Blynk
+#define BLYNK_TEMPLATE_ID "TMPL60_vqeP1s"
+#define BLYNK_TEMPLATE_NAME "Wover"
+#define BLYNK_AUTH_TOKEN "YhiKvAyXm0hu4qoxPEwDQ8Qg7PKxZh4V"
+#define BLYNK_PRINT Serial
+
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <BlynkSimpleEsp32.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include "DFRobotDFPlayerMini.h"
+#include <HardwareSerial.h>
+
+
+// Definisi pin untuk DFPlayer dan tombol
+#define LOCK 15
+#define SENSOR 13
+#define BELL 2
+#define SDA_PIN 12
+#define SCL_PIN 14
+
+// Inisialisasi objek
+DFRobotDFPlayerMini myDFPlayer;
+HardwareSerial mySerial(1);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+BlynkTimer timer;
+char auth[] = BLYNK_AUTH_TOKEN;
+char ssid[] = "Mi 10T";     // Ganti dengan SSID WiFi Anda
+char pass[] = "123456789";  // Ganti dengan password WiFi Anda
+String blynkText = "  *WELLCOME*";
+
+// Variabel untuk memeriksa status tamu
+bool tamuTerdeteksi = false;
+
+// Fungsi untuk menampilkan teks di LCD
+void displayText(String text) {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(text.substring(0, 16));  // Baris pertama
+  if (text.length() > 16) {
+    lcd.setCursor(0, 1);
+    lcd.print(text.substring(16, 32));  // Baris kedua jika ada
+  }
+}
+
+// Fungsi untuk mendeteksi tamu dan memainkan suara menggunakan DFPlayer
+void adaTamu() {
+  if (digitalRead(SENSOR) == LOW && !tamuTerdeteksi) {  // Tamu terdeteksi dan belum diberi notifikasi
+    Serial.println("Objek terdeteksi");
+    myDFPlayer.volume(30);                                     // Set volume (0-30)
+    myDFPlayer.play(1);                                        // Play file 001.mp3
+    displayText("Tamu Terdeteksi");                            // Tampilkan pesan di LCD
+    tamuTerdeteksi = true;                                     // Tandai bahwa tamu sudah terdeteksi dan notifikasi sudah diberikan
+  } else if (digitalRead(SENSOR) == HIGH && tamuTerdeteksi) {  // Tamu tidak lagi di depan sensor
+    tamuTerdeteksi = false;                                    // Reset status deteksi tamu
+    displayText("Tamu Tidak Terdeteksi"); 
+  }
+}
+
+// Fungsi untuk menangani tombol Blynk
+BLYNK_WRITE(V0) {
+  digitalWrite(LOCK, param.asInt());
+}
+
+// Fungsi untuk menangani teks Blynk
+BLYNK_WRITE(V1) {
+  blynkText = param.asString();  // Mendapatkan teks dari aplikasi Blynk
+  displayText(blynkText);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LOCK, OUTPUT);
+  pinMode(SENSOR, INPUT);
+  pinMode(BELL, INPUT_PULLUP);
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  lcd.begin();
+  lcd.backlight();
+  displayText(blynkText);
+
+  // Setup Blynk
+  Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
+  WiFi.begin(ssid, pass);
+
+  // Inisialisasi DFPlayer
+  mySerial.begin(9600, SERIAL_8N1, 33, 32);  // Serial untuk DFPlayer, GPIO32 (RX), GPIO33 (TX)
+  if (!myDFPlayer.begin(mySerial)) {
+    Serial.println("DFPlayer gagal diinisialisasi!");
+    while (true)
+      ;  // Hentikan program
+  }
+  Serial.println("DFPlayer Mini online.");
+
+  // Set interval untuk memeriksa sensor tamu
+  timer.setInterval(2000L, adaTamu);
+}
+
+void loop() {
+  Blynk.run();
+
+  // Deteksi tombol bel ditekan
+  if (digitalRead(BELL) == LOW) {
+    Serial.println("Tombol bell ditekan");
+    myDFPlayer.volume(30);  // Set volume (0-30)
+    myDFPlayer.play(2);     // Play file 002.mp3
+    delay(500);
+    Blynk.logEvent("tamu_alert", "Ada orang di depan");
+    lcd.setCursor(0, 0);
+    lcd.print("  Mohon Tunggu  ");
+    lcd.setCursor(0, 1);
+    lcd.print("  Pintu Dibuka  ");
+    Serial.println("Objek terdeteksi, mengirim notifikasi...");
+    if (Blynk.connected()) {
+      Blynk.logEvent("tamu_alert", "Ada orang di depan");
+    } else {
+      Serial.println("Tidak terhubung ke Blynk.");
+    }
+  }
+  timer.run();
+}
